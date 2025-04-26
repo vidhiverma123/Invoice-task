@@ -1,101 +1,121 @@
 
-//Copyright (c) 2022 Panshak Solomon
+import { pool } from '../db/index.js'
 
-import express from 'express'
-import mongoose from 'mongoose'
-
-import InvoiceModel from '../models/InvoiceModel.js'
+export const getInvoice = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const invoice = await pool.query('SELECT * FROM invoices WHERE id = $1', [id]);
+        if (invoice.rows.length === 0) {
+            return res.status(404).json({ message: "Invoice not found" });
+        }
+        res.status(200).json(invoice.rows[0]);
+    } catch (error) {
+        res.status(404).json({ message: error.message });
+    }
+};
 
 export const getInvoicesByUser = async (req, res) => {
-    const {searchQuery} = req.query;
-
+    const { searchQuery } = req.query;
     try {
-        const invoices = await InvoiceModel.find({ creator: searchQuery });
-
-        res.status(200).json({ data: invoices });
-    } catch (error) {    
-        res.status(404).json({ message: error.message });
-    }
-}
-
-
-export const getTotalCount = async (req, res) => {
-    const {searchQuery} = req.query;
-
-    try {
-        // const invoices = await InvoiceModel.find({ creator: searchQuery });
-        const totalCount = await InvoiceModel.countDocuments({ creator: searchQuery });
-
-        res.status(200).json(totalCount);
-    } catch (error) {    
-        res.status(404).json({ message: error.message });
-    }
-}
-
-
-export const getInvoices = async (req, res) => {
-
-    try {
-        const allInvoices = await InvoiceModel.find({}).sort({_id:-1}) 
-
-        res.status(200).json(allInvoices)
-
+        const invoices = await pool.query(
+            'SELECT * FROM invoices WHERE creator = $1 ORDER BY created_at DESC',
+            [searchQuery]
+        );
+        res.json({ data: invoices.rows });
     } catch (error) {
-        res.status(409).json(error.message)
-        
+        res.status(404).json({ message: error.message });
     }
-    
-}
-
-
-
+};
 
 export const createInvoice = async (req, res) => {
-
-    const invoice = req.body
-
-    const newInvoice = new InvoiceModel(invoice)
-
+    const invoice = req.body;
     try {
-        await newInvoice.save()
-        res.status(201).json(newInvoice)
-    } catch (error) {
-        res.status(409).json(error.message)
-    }
-
-}
-
-export const getInvoice = async (req, res) => { 
-    const { id } = req.params;
-
-    try {
-        const invoice = await InvoiceModel.findById(id);
-        
-        res.status(200).json(invoice);
+        const result = await pool.query(
+            `INSERT INTO invoices (
+                due_date, currency, items, rates, vat, total,
+                sub_total, notes, status, invoice_number, type,
+                creator, client, payment_records
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
+            [
+                invoice.dueDate,
+                invoice.currency,
+                JSON.stringify(invoice.items),
+                invoice.rates,
+                invoice.vat,
+                invoice.total,
+                invoice.subTotal,
+                invoice.notes,
+                invoice.status,
+                invoice.invoiceNumber,
+                invoice.type,
+                invoice.creator,
+                JSON.stringify(invoice.client),
+                JSON.stringify(invoice.paymentRecords || [])
+            ]
+        );
+        res.status(201).json(result.rows[0]);
     } catch (error) {
         res.status(409).json({ message: error.message });
     }
-}
-
+};
 
 export const updateInvoice = async (req, res) => {
-    const { id: _id } = req.params
-    const invoice = req.body
-
-    if(!mongoose.Types.ObjectId.isValid(_id)) return res.status(404).send('No invoice with that id')
-
-    const updatedInvoice = await InvoiceModel.findByIdAndUpdate(_id, {...invoice, _id}, { new: true})
-
-    res.json(updatedInvoice)
-}
-
+    const { id } = req.params;
+    const invoice = req.body;
+    try {
+        const result = await pool.query(
+            `UPDATE invoices SET 
+                due_date = $1, currency = $2, items = $3, rates = $4,
+                vat = $5, total = $6, sub_total = $7, notes = $8,
+                status = $9, invoice_number = $10, type = $11,
+                client = $12, payment_records = $13,
+                total_amount_received = $14
+            WHERE id = $15 RETURNING *`,
+            [
+                invoice.dueDate,
+                invoice.currency,
+                JSON.stringify(invoice.items),
+                invoice.rates,
+                invoice.vat,
+                invoice.total,
+                invoice.subTotal,
+                invoice.notes,
+                invoice.status,
+                invoice.invoiceNumber,
+                invoice.type,
+                JSON.stringify(invoice.client),
+                JSON.stringify(invoice.paymentRecords),
+                invoice.totalAmountReceived,
+                id
+            ]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "Invoice not found" });
+        }
+        res.json(result.rows[0]);
+    } catch (error) {
+        res.status(409).json({ message: error.message });
+    }
+};
 
 export const deleteInvoice = async (req, res) => {
-    const { id } = req.params
+    const { id } = req.params;
+    try {
+        const result = await pool.query('DELETE FROM invoices WHERE id = $1 RETURNING *', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "Invoice not found" });
+        }
+        res.json({ message: "Invoice deleted successfully" });
+    } catch (error) {
+        res.status(409).json({ message: error.message });
+    }
+};
 
-    if(!mongoose.Types.ObjectId.isValid(id)) return res.status(404).send('No invoice with that id')
-
-    await InvoiceModel.findByIdAndRemove(id)
-
-    res.json({message: 'Invoice deleted successfully'})
-}
+export const getTotalCount = async (req, res) => {
+    try {
+        const result = await pool.query('SELECT COUNT(*) FROM invoices');
+        res.json(result.rows[0].count);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};

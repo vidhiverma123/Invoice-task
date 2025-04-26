@@ -21,80 +21,95 @@ import ClientModel from '../models/ClientModel.js'
 // }
 
 
-export const getClient = async (req, res) => { 
-    const { id } = req.params;
+import { pool } from '../db/index.js'
 
+export const getClient = async (req, res) => {
+    const { id } = req.params;
     try {
-        const client = await ClientModel.findById(id);
-        
-        res.status(200).json(client);
+        const client = await pool.query('SELECT * FROM clients WHERE id = $1', [id]);
+        if (client.rows.length === 0) {
+            return res.status(404).json({ message: "Client not found" });
+        }
+        res.status(200).json(client.rows[0]);
     } catch (error) {
         res.status(404).json({ message: error.message });
     }
-}
-
+};
 
 export const getClients = async (req, res) => {
     const { page } = req.query;
-    
     try {
         const LIMIT = 8;
-        const startIndex = (Number(page) - 1) * LIMIT; // get the starting index of every page
-    
-        const total = await ClientModel.countDocuments({});
-        const clients = await ClientModel.find().sort({ _id: -1 }).limit(LIMIT).skip(startIndex);
+        const offset = (Number(page) - 1) * LIMIT;
+        
+        const total = await pool.query('SELECT COUNT(*) FROM clients');
+        const clients = await pool.query(
+            'SELECT * FROM clients ORDER BY created_at DESC LIMIT $1 OFFSET $2',
+            [LIMIT, offset]
+        );
 
-        res.json({ data: clients, currentPage: Number(page), numberOfPages: Math.ceil(total / LIMIT)});
-    } catch (error) {    
+        res.json({
+            data: clients.rows,
+            currentPage: Number(page),
+            numberOfPages: Math.ceil(total.rows[0].count / LIMIT)
+        });
+    } catch (error) {
         res.status(404).json({ message: error.message });
     }
-}
+};
 
 export const createClient = async (req, res) => {
-
-    const client = req.body
-
-    const newClient = new ClientModel({...client, createdAt: new Date().toISOString() })
-
+    const client = req.body;
     try {
-        await newClient.save()
-        res.status(201).json(newClient)
+        const result = await pool.query(
+            'INSERT INTO clients (name, email, phone, address, user_id) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+            [client.name, client.email, client.phone, client.address, client.userId]
+        );
+        res.status(201).json(result.rows[0]);
     } catch (error) {
-        res.status(409).json(error.message)
+        res.status(409).json({ message: error.message });
     }
-}
+};
 
 export const updateClient = async (req, res) => {
-    const { id: _id } = req.params
-    const client = req.body
-
-    if(!mongoose.Types.ObjectId.isValid(_id)) return res.status(404).send('No client with that id')
-
-    const updatedClient = await ClientModel.findByIdAndUpdate(_id, {...client, _id}, { new: true})
-
-    res.json(updatedClient)
-}
-
+    const { id } = req.params;
+    const client = req.body;
+    try {
+        const result = await pool.query(
+            'UPDATE clients SET name = $1, email = $2, phone = $3, address = $4 WHERE id = $5 RETURNING *',
+            [client.name, client.email, client.phone, client.address, id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "Client not found" });
+        }
+        res.json(result.rows[0]);
+    } catch (error) {
+        res.status(409).json({ message: error.message });
+    }
+};
 
 export const deleteClient = async (req, res) => {
-    const { id } = req.params
-
-    if(!mongoose.Types.ObjectId.isValid(id)) return res.status(404).send('No Client with that id')
-
-    await ClientModel.findByIdAndRemove(id)
-
-    res.json({message: 'Client deleted successfully'})
-}
-
+    const { id } = req.params;
+    try {
+        const result = await pool.query('DELETE FROM clients WHERE id = $1 RETURNING *', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "Client not found" });
+        }
+        res.json({ message: "Client deleted successfully" });
+    } catch (error) {
+        res.status(409).json({ message: error.message });
+    }
+};
 
 export const getClientsByUser = async (req, res) => {
     const { searchQuery } = req.query;
-
     try {
-        const clients = await ClientModel.find({ userId: searchQuery });
-
-        res.json({ data: clients });
-    } catch (error) {    
+        const clients = await pool.query(
+            'SELECT * FROM clients WHERE user_id = $1',
+            [searchQuery]
+        );
+        res.json({ data: clients.rows });
+    } catch (error) {
         res.status(404).json({ message: error.message });
     }
 }
